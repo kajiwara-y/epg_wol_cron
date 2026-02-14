@@ -42,17 +42,15 @@ class CacheUpdater:
 
     def _load_config(self, config_path):
         """設定ファイルを読み込み"""
-        print(f"[起動] 設定ファイル読込開始: {config_path}")
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            print(f"[起動] ✓ 設定ファイル読込成功")
             return config
         except FileNotFoundError:
-            print(f"[起動] ✗ 設定ファイルが見つかりません: {config_path}")
+            print(f"エラー: 設定ファイルが見つかりません: {config_path}")
             sys.exit(1)
         except json.JSONDecodeError:
-            print(f"[起動] ✗ 設定ファイルのJSON形式が無効です: {config_path}")
+            print(f"エラー: 設定ファイルのJSON形式が無効です: {config_path}")
             sys.exit(1)
 
     def update(self):
@@ -191,9 +189,6 @@ def main():
     # デバッグモード判定（--debug フラグで有効化）
     debug_mode = "--debug" in sys.argv
 
-    if debug_mode:
-        print("[起動] デバッグモード: コンソール出力が有効です")
-
     # パスの設定
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.dirname(script_dir)
@@ -202,20 +197,9 @@ def main():
     cache_path = os.path.join(project_dir, "cache", "reserves.json")
     log_dir = os.path.join(project_dir, "logs")
 
-    if debug_mode:
-        print(f"[起動] スクリプトディレクトリ: {script_dir}")
-        print(f"[起動] プロジェクトディレクトリ: {project_dir}")
-        print(f"[起動] 設定ファイル: {config_path}")
-        print(f"[起動] キャッシュファイル: {cache_path}")
-        print(f"[起動] ログディレクトリ: {log_dir}")
-
     # キャッシュ更新実行
     updater = CacheUpdater(config_path, cache_path, log_dir, debug=debug_mode)
     success = updater.update()
-
-    if debug_mode:
-        result = "成功" if success else "失敗"
-        print(f"[終了] キャッシュ更新: {result}")
 
     sys.exit(0 if success else 1)
 
