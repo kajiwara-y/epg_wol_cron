@@ -21,6 +21,14 @@
   },
   "logging": {
     "level": "INFO",
-    "dir": "/var/log/epgstation-wol"
+    "dir": "/var/log/epgstation-wol",
+    "rotation": {
+      "frequency": "daily",
+      "rotate": 7,
+      "compress": true,
+      "delaycompress": true,
+      "notifempty": true,
+      "missingok": true
+    }
   }
 }
