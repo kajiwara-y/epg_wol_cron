@@ -18,7 +18,7 @@ class Logger:
         """
         os.makedirs(log_dir, exist_ok=True)
         self.log_path = os.path.join(log_dir, f"{log_name}.log")
-        self.debug = debug
+        self.debug_mode = debug
 
         self.logger = logging.getLogger(log_name)
         self.logger.setLevel(level)
@@ -37,7 +37,7 @@ class Logger:
         self.logger.addHandler(fh)
 
         # デバッグモードの場合、コンソールハンドラも追加
-        if self.debug:
+        if self.debug_mode:
             ch = logging.StreamHandler()
             ch.setLevel(level)
             ch.setFormatter(formatter)

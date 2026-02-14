@@ -36,6 +36,7 @@ class WOLChecker:
         self.config = self._load_config(config_path)
         self.cache_path = cache_path
         self.logger = Logger(log_dir, "wol", level="INFO")
+
         self.pc_monitor = PCMonitor(
             self.config["desktop_pc"]["ip_address"],
             self.config["monitoring"]["pc_check_timeout"]
@@ -61,34 +62,56 @@ class WOLChecker:
             bool: 処理成功ならTrue
         """
         try:
+            self.logger.info("WOL送信チェック処理開始")
+
             # PCが起動している場合はスキップ
-            if self.pc_monitor.is_pc_alive(self.config["monitoring"]["pc_check_method"]):
+            pc_check_method = self.config["monitoring"]["pc_check_method"]
+            self.logger.info(f"PC起動確認開始（方法: {pc_check_method}）")
+
+            if self.pc_monitor.is_pc_alive(pc_check_method):
                 self.logger.info("PCが起動中のため、WOL送信をスキップ")
                 return True
 
+            self.logger.info("PCが起動していません")
+
             # キャッシュから予約情報を読み込み
+            self.logger.info(f"キャッシュファイル読み込み開始: {self.cache_path}")
             cache_data = self._load_cache()
             if not cache_data:
                 self.logger.warning("キャッシュが見つかりません")
                 return False
 
+            self.logger.info("キャッシュ読み込み成功")
+
             # キャッシュの鮮度をチェック
+            self.logger.info("キャッシュ鮮度チェック開始")
             if not self._check_cache_freshness(cache_data):
                 self.logger.warning("キャッシュが古すぎます")
                 return False
 
+            self.logger.info("キャッシュは最新です")
+
             # 予約情報から条件に合致するものを検索
+            self.logger.info(f"予約検索開始（保存済み予約数: {len(cache_data['reserves'])}件）")
             reserve_to_send = self._find_reserve_to_send(cache_data["reserves"])
 
             if reserve_to_send:
-                self.logger.info(f"予約検出: {reserve_to_send['program_name']}")
-                return self._send_wol(cache_data)
+                self.logger.info(f"予約検出: {reserve_to_send['program_name']} (開始時刻: {reserve_to_send['start_time']})")
+                self.logger.info("WOL送信実行")
+                result = self._send_wol(cache_data)
+                if result:
+                    self.logger.info("WOL送信処理完了（成功）")
+                else:
+                    self.logger.error("WOL送信処理完了（失敗）")
+                return result
             else:
-                self.logger.debug("送信対象の予約なし")
+                self.logger.info("送信対象の予約なし")
                 return True
 
         except Exception as e:
+            import traceback
             self.logger.error(f"WOL送信チェック中にエラー: {e}")
+            self.logger.error(f"スタックトレース:\n{traceback.format_exc()}")
             return False
 
     def _load_cache(self):
@@ -100,12 +123,19 @@ class WOLChecker:
         """
         try:
             if not os.path.exists(self.cache_path):
+                self.logger.error(f"キャッシュファイルが存在しません: {self.cache_path}")
                 return None
 
+            self.logger.debug(f"キャッシュファイルを読み込み中: {self.cache_path}")
             with open(self.cache_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            self.logger.error("キャッシュのJSON解析失敗")
+                cache_data = json.load(f)
+            self.logger.debug(f"キャッシュ読み込み完了（サイズ: {len(str(cache_data))}バイト）")
+            return cache_data
+        except json.JSONDecodeError as e:
+            self.logger.error(f"キャッシュのJSON解析失敗: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"キャッシュ読み込みエラー: {e}")
             return None
 
     def _check_cache_freshness(self, cache_data):
@@ -118,17 +148,26 @@ class WOLChecker:
         Returns:
             bool: 十分に新鮮ならTrue
         """
-        max_age = self.config["cache"]["max_age_hours"]
-        last_updated = datetime.fromisoformat(cache_data["last_updated"])
-        age = datetime.now() - last_updated
+        try:
+            max_age_hours = self.config["cache"]["max_age_hours"]
+            last_updated = datetime.fromisoformat(cache_data["last_updated"])
+            age = datetime.now() - last_updated
+            age_hours = age.total_seconds() / 3600
 
-        if age > timedelta(hours=max_age):
-            self.logger.warning(
-                f"キャッシュが古い: {age}時間前に更新 (最大: {max_age}時間)"
-            )
+            self.logger.debug(f"キャッシュ最終更新: {last_updated.isoformat()}")
+            self.logger.debug(f"キャッシュ経過時間: {age_hours:.2f}時間 (最大: {max_age_hours}時間)")
+
+            if age > timedelta(hours=max_age_hours):
+                self.logger.warning(
+                    f"キャッシュが古すぎます: {age_hours:.2f}時間前に更新 (最大: {max_age_hours}時間)"
+                )
+                return False
+
+            self.logger.debug("キャッシュ鮮度チェック: OK")
+            return True
+        except (ValueError, KeyError) as e:
+            self.logger.error(f"キャッシュ鮮度チェック失敗: {e}")
             return False
-
-        return True
 
     def _find_reserve_to_send(self, reserves):
         """
@@ -149,25 +188,47 @@ class WOLChecker:
         first_minutes = self.config["wol_timing"]["first_minutes"]
         second_minutes = self.config["wol_timing"]["second_minutes"]
 
-        for reserve in reserves:
+        self.logger.debug(f"WOL送信タイミング設定: 第1={first_minutes}分前、第2={second_minutes}分前")
+        self.logger.debug(f"予約検索対象: {len(reserves)}件")
+
+        for i, reserve in enumerate(reserves):
             try:
                 start_time = datetime.fromisoformat(reserve["start_time"])
                 time_until_start = (start_time - now).total_seconds() / 60
+                program_name = reserve.get("program_name", "不明")
+
+                self.logger.debug(
+                    f"予約{i+1}: {program_name} / 開始時刻: {start_time.isoformat()} / "
+                    f"開始まで: {time_until_start:.1f}分"
+                )
 
                 # 第1タイミング: first_minutes分前（±2分範囲）
                 if (first_minutes - 5) <= time_until_start <= (first_minutes + 2):
                     if not reserve.get("wol_sent_first", False):
+                        self.logger.info(
+                            f"WOL送信対象検出（第1タイミング）: {program_name} "
+                            f"({time_until_start:.1f}分前)"
+                        )
                         return reserve
+                    else:
+                        self.logger.debug(f"第1タイミングでの送信済み: {program_name}")
 
                 # 第2タイミング: second_minutes分前（±2分範囲）
                 if (second_minutes - 2) <= time_until_start <= (second_minutes + 2):
                     if not reserve.get("wol_sent_second", False):
+                        self.logger.info(
+                            f"WOL送信対象検出（第2タイミング）: {program_name} "
+                            f"({time_until_start:.1f}分前)"
+                        )
                         return reserve
+                    else:
+                        self.logger.debug(f"第2タイミングでの送信済み: {program_name}")
 
             except (ValueError, KeyError) as e:
-                self.logger.debug(f"予約情報の解析エラー: {e}")
+                self.logger.debug(f"予約情報の解析エラー（予約{i+1}）: {e}")
                 continue
 
+        self.logger.debug("WOL送信対象なし")
         return None
 
     def _send_wol(self, cache_data):
@@ -182,27 +243,36 @@ class WOLChecker:
         """
         try:
             mac_address = self.config["desktop_pc"]["mac_address"]
+            self.logger.info(f"WOLパケット送信開始 (MAC: {mac_address})")
 
             # send_wol.pyを実行
             send_wol_script = os.path.join(os.path.dirname(__file__), "send_wol.py")
+            self.logger.debug(f"WOLスクリプト実行: {send_wol_script}")
+
             result = subprocess.run(
                 [sys.executable, send_wol_script, mac_address],
                 capture_output=True,
                 timeout=5
             )
 
+            self.logger.debug(f"WOLスクリプト終了コード: {result.returncode}")
+
             if result.returncode != 0:
-                self.logger.error(f"WOL送信失敗: {result.stderr.decode()}")
+                error_msg = result.stderr.decode()
+                self.logger.error(f"WOL送信失敗: {error_msg}")
                 return False
 
+            self.logger.debug("WOLスクリプト実行成功")
+
             # キャッシュの送信済みフラグを更新
+            self.logger.info("キャッシュ更新開始")
             self._mark_wol_sent(cache_data)
 
-            self.logger.info(f"WOL送信成功 (MAC: {mac_address})")
+            self.logger.info(f"WOL送信完了成功 (MAC: {mac_address})")
             return True
 
         except subprocess.TimeoutExpired:
-            self.logger.error("WOL送信タイムアウト")
+            self.logger.error("WOL送信タイムアウト (スクリプト実行時間超過)")
             return False
         except Exception as e:
             self.logger.error(f"WOL送信エラー: {e}")
@@ -220,25 +290,39 @@ class WOLChecker:
             first_minutes = self.config["wol_timing"]["first_minutes"]
             second_minutes = self.config["wol_timing"]["second_minutes"]
 
+            self.logger.debug("送信済みフラグ更新処理開始")
+            updated_count = 0
+
             for reserve in cache_data["reserves"]:
                 try:
                     start_time = datetime.fromisoformat(reserve["start_time"])
                     time_until_start = (start_time - now).total_seconds() / 60
+                    program_name = reserve.get("program_name", "不明")
 
                     # 第1タイミングで送信の場合
                     if (first_minutes - 5) <= time_until_start <= (first_minutes + 2):
-                        reserve["wol_sent_first"] = True
+                        if not reserve.get("wol_sent_first", False):
+                            reserve["wol_sent_first"] = True
+                            self.logger.debug(f"第1タイミング送信済みフラグ更新: {program_name}")
+                            updated_count += 1
 
                     # 第2タイミングで送信の場合
                     if (second_minutes - 2) <= time_until_start <= (second_minutes + 2):
-                        reserve["wol_sent_second"] = True
+                        if not reserve.get("wol_sent_second", False):
+                            reserve["wol_sent_second"] = True
+                            self.logger.debug(f"第2タイミング送信済みフラグ更新: {program_name}")
+                            updated_count += 1
 
-                except (ValueError, KeyError):
+                except (ValueError, KeyError) as e:
+                    self.logger.debug(f"予約情報処理エラー: {e}")
                     continue
 
             # キャッシュを保存
+            self.logger.info(f"キャッシュファイル保存開始（更新件数: {updated_count}件）")
             with open(self.cache_path, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+            self.logger.info(f"キャッシュファイル保存完了: {self.cache_path}")
 
         except Exception as e:
             self.logger.error(f"キャッシュ更新エラー: {e}")
@@ -255,10 +339,22 @@ def main():
     log_dir = os.path.join(project_dir, "logs")
 
     # WOLチェック・送信実行
-    checker = WOLChecker(config_path, cache_path, log_dir)
-    success = checker.check_and_send()
+    try:
+        checker = WOLChecker(config_path, cache_path, log_dir)
+        success = checker.check_and_send()
 
-    sys.exit(0 if success else 1)
+        if success:
+            exit_code = 0
+        else:
+            exit_code = 1
+
+    except Exception as e:
+        import traceback
+        print(f"致命的エラー: {e}")
+        print(f"スタックトレース:\n{traceback.format_exc()}")
+        exit_code = 2
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

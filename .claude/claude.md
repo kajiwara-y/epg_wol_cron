@@ -249,3 +249,47 @@ nano config/config.json        # 実際の値を設定
 - **コメント**: 日本語で記述
 - **ログ**: 日本語で記述
 - **ドキュメント**: 日本語
+
+---
+
+## コーディング規約
+
+### ロギングとprint文
+
+✅ **推奨：logger使用**
+```python
+# loggerを使用してすべての情報を記録
+self.logger.info("処理開始")
+self.logger.warning("警告メッセージ")
+self.logger.error("エラーメッセージ")
+self.logger.debug("デバッグ情報")
+```
+
+❌ **非推奨：print文の使用**
+- cronから実行される場合、print出力は消失するため使用禁止
+- ログファイルに記録されないため、運用時の追跡が困難になる
+
+**例外：仮実装段階のみ**
+- 開発初期段階での一時的な動作確認のみprint使用可
+- 実装完了時には必ずloggerに置き換える
+
+### logger初期化
+
+```python
+# CacheUpdaterクラス内で初期化
+self.logger = Logger(log_dir, "update", level="INFO", debug=debug)
+
+# debug=Trueの場合、コンソール出力も有効
+if debug:
+    self.logger.info("デバッグモード有効: コンソール出力を表示します")
+```
+
+### エラーハンドリング
+
+```python
+# 設定ファイルが見つからない場合は、print + sys.exit()で対応
+# （初期化前のため、loggerが未設定）
+except FileNotFoundError:
+    print(f"エラー: 設定ファイルが見つかりません: {config_path}")
+    sys.exit(1)
+```
