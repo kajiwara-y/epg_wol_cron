@@ -34,6 +34,9 @@ cache/reserves.json
 logs/
 *.log
 
+# 注記: Raspberry Pi上では /var/log/epgstation-wol/ にログが保存されます
+# ローカル開発環境では logs/ ディレクトリにログが保存されます
+
 # IDE
 .vscode/
 .idea/

@@ -336,7 +336,17 @@ def main():
 
     config_path = os.path.join(project_dir, "config", "config.json")
     cache_path = os.path.join(project_dir, "cache", "reserves.json")
-    log_dir = os.path.join(project_dir, "logs")
+
+    # 設定ファイルを読み込んでログディレクトリを取得
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        log_dir = config.get("logging", {}).get("dir", os.path.join(project_dir, "logs"))
+        # チルダ展開に対応（~/... の場合）
+        log_dir = os.path.expanduser(log_dir)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # 設定ファイルが読み込めない場合はデフォルト値を使用
+        log_dir = os.path.join(project_dir, "logs")
 
     # WOLチェック・送信実行
     try:

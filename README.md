@@ -148,16 +148,30 @@ nano config/config.json
 }
 ```
 
-#### 5. Cron設定
+#### 5. ログローテーション設定
+
+```bash
+# セットアップスクリプトを実行
+sudo bash setup/install.sh
+```
+
+詳細は [setup/LOGROTATE.md](setup/LOGROTATE.md) を参照してください。
+
+#### 6. Cron設定
 
 ```bash
 # crontabを編集
 crontab -e
 
 # 以下の行を追加
-*/10 * * * * /bin/bash -c 'cd ~/epgstation-wol && source venv/bin/activate && python3 scripts/update_cache.py >> logs/update.log 2>&1'
-*/5 * * * * /bin/bash -c 'cd ~/epgstation-wol && source venv/bin/activate && python3 scripts/check_and_wol.py >> logs/wol.log 2>&1'
+*/10 * * * * /home/pi/epgstation-wol/scripts/update_cache.py
+*/5 * * * * /home/pi/epgstation-wol/scripts/check_and_wol.py
 ```
+
+**注意**:
+- パスは環境に合わせて調整してください
+- ログはスクリプト内の logger により `/var/log/epgstation-wol/` に自動記録されます
+- リダイレクトは不要です
 
 ## 使用方法
 
@@ -177,12 +191,30 @@ python scripts/send_wol.py XX:XX:XX:XX:XX:XX
 ### ログ確認
 
 ```bash
-# キャッシュ更新ログ
-tail -f logs/update.log
+# キャッシュ更新ログ（システムログディレクトリ）
+tail -f /var/log/epgstation-wol/update.log
 
-# WOL送信ログ
-tail -f logs/wol.log
+# WOL送信ログ（システムログディレクトリ）
+tail -f /var/log/epgstation-wol/wol.log
+
+# 圧縮されたログを確認
+zcat /var/log/epgstation-wol/update.log.2.gz | head -20
 ```
+
+### ログローテーション確認
+
+```bash
+# ログディレクトリの内容を確認
+ls -lh /var/log/epgstation-wol/
+
+# logrotateの設定を確認
+sudo cat /etc/logrotate.d/epgstation-wol
+
+# logrotateの動作テスト
+sudo logrotate -d /etc/logrotate.d/epgstation-wol
+```
+
+詳細は [setup/LOGROTATE.md](setup/LOGROTATE.md) を参照してください。
 
 ## 動作原理
 
