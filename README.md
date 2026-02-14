@@ -155,8 +155,8 @@ nano config/config.json
 crontab -e
 
 # 以下の行を追加
-*/10 * * * * cd ~/epgstation-wol && source venv/bin/activate && python scripts/update_cache.py >> logs/update.log 2>&1
-*/5 * * * * cd ~/epgstation-wol && source venv/bin/activate && python scripts/check_and_wol.py >> logs/wol.log 2>&1
+*/10 * * * * /bin/bash -c 'cd ~/epgstation-wol && source venv/bin/activate && python3 scripts/update_cache.py >> logs/update.log 2>&1'
+*/5 * * * * /bin/bash -c 'cd ~/epgstation-wol && source venv/bin/activate && python3 scripts/check_and_wol.py >> logs/wol.log 2>&1'
 ```
 
 ## 使用方法
