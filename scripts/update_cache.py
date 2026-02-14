@@ -12,7 +12,8 @@ import json
 import os
 import sys
 import requests
-from datetime import datetime
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -107,7 +108,7 @@ class CacheUpdater:
             api_url = self.config["epgstation"]["api_url"]
             timeout = self.config["epgstation"]["timeout"]
 
-            url = f"{api_url}/reserves"
+            url = f"{api_url}/EnumReserveInfo"
             self.logger.info(f"API呼び出し: {url} (タイムアウト: {timeout}秒)")
 
             response = requests.get(url, timeout=timeout)
@@ -115,22 +116,19 @@ class CacheUpdater:
 
             response.raise_for_status()
 
-            # APIレスポンスが配列の場合、そのまま返す
-            # オブジェクトの場合、中身の配列を抽出
-            data = response.json()
-            self.logger.info(f"API応答型: {type(data).__name__}")
+            # XMLレスポンスをパース
+            root = ET.fromstring(response.content)
+            self.logger.info("XMLレスポンス形式を検出")
 
-            if isinstance(data, list):
-                self.logger.info(f"APIレスポンス形式: 配列（{len(data)}件）")
-                return data
-            elif isinstance(data, dict) and "reserves" in data:
-                reserves = data["reserves"]
-                self.logger.info(f"APIレスポンス形式: オブジェクト内reserves（{len(reserves)}件）")
-                return reserves
-            else:
-                # 期待しない形式のレスポンス
-                self.logger.warning(f"予期しないAPI応答形式: {type(data)}")
-                return data if isinstance(data, list) else []
+            # reserveinfo要素を抽出
+            reserves = []
+            for item in root.findall(".//reserveinfo"):
+                reserve = self._parse_reserve_info(item)
+                if reserve:
+                    reserves.append(reserve)
+
+            self.logger.info(f"APIレスポンス解析完了: {len(reserves)}件の予約を抽出")
+            return reserves
 
         except requests.exceptions.Timeout:
             self.logger.error("API取得タイムアウト")
@@ -138,8 +136,53 @@ class CacheUpdater:
         except requests.exceptions.RequestException as e:
             self.logger.error(f"API取得エラー: {e}")
             return None
-        except json.JSONDecodeError:
-            self.logger.error("API応答のJSON解析失敗")
+        except ET.ParseError as e:
+            self.logger.error(f"XML解析失敗: {e}")
+            return None
+
+    def _parse_reserve_info(self, element):
+        """
+        reserveinfo要素をパース
+
+        Args:
+            element: XML要素
+
+        Returns:
+            dict: 予約情報、パース失敗の場合はNone
+        """
+        try:
+            # 各フィールドを抽出
+            reserve_id = element.findtext("ID")
+            title = element.findtext("title")
+            start_date = element.findtext("startDate")
+            start_time = element.findtext("startTime")
+            duration = element.findtext("duration")
+
+            if not all([reserve_id, title, start_date, start_time, duration]):
+                self.logger.debug("必須フィールドが不足しています")
+                return None
+
+            # 開始日時をISO形式に変換（YYYY/MM/DD + HH:MM:SS → YYYY-MM-DDTHH:MM:SS）
+            start_datetime_str = f"{start_date.replace('/', '-')}T{start_time}"
+            start_datetime = datetime.fromisoformat(start_datetime_str)
+
+            # 終了時刻を計算（duration は秒単位）
+            duration_seconds = int(duration)
+            end_datetime = start_datetime + timedelta(seconds=duration_seconds)
+
+            reserve = {
+                "id": reserve_id,
+                "program_name": title,
+                "start_time": start_datetime.isoformat(),
+                "end_time": end_datetime.isoformat(),
+                "wol_sent_first": False,
+                "wol_sent_second": False
+            }
+
+            return reserve
+
+        except (ValueError, AttributeError) as e:
+            self.logger.debug(f"予約情報のパースエラー: {e}")
             return None
 
 
